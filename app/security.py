@@ -2,6 +2,7 @@
 import os
 import secrets
 
+from fastapi import Depends
 from fastapi import Header, HTTPException
 from dotenv import load_dotenv
 
@@ -90,3 +91,25 @@ def verificar_usuario_supabase(
             status_code=401,
             detail="Token inválido o sesión expirada."
         )
+
+def verificar_acceso_documentos(
+    x_api_key: str = Header(default=None),
+    authorization: str = Header(default=None)
+):
+    # Acceso mediante API Key: n8n
+    if x_api_key:
+        verificar_api_key(x_api_key)
+        return {"tipo": "automatizacion"}
+
+    # Acceso mediante token: frontend
+    if authorization:
+        usuario = verificar_usuario_supabase(authorization)
+        return {
+            "tipo": "usuario",
+            "usuario": usuario
+        }
+
+    raise HTTPException(
+        status_code=401,
+        detail="Debes autenticarte para acceder al documento."
+    )
