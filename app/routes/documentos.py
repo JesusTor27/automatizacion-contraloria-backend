@@ -1,6 +1,7 @@
 import logging
 from uuid import UUID
 from urllib.parse import quote
+from app.security import verificar_acceso_documentos
 
 from fastapi import (
     APIRouter,
@@ -71,7 +72,7 @@ async def cargar_documento(
 @router.get("/archivo/{documento_id}")
 def descargar_documento(
     documento_id: UUID,
-    _: bool = Depends(verificar_api_key)
+    _: bool = Depends(verificar_acceso_documentos)
 ):
     try:
         archivo = documento_service.descargar_documento(
