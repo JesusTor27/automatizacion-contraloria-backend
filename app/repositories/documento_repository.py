@@ -25,8 +25,14 @@ class DocumentoRepository:
         """)
 
         with engine.begin() as connection:
-            resultado = connection.execute(consulta, datos)
-            return dict(resultado.mappings().one())
+            resultado = connection.execute(
+                consulta,
+                datos
+            )
+
+            return dict(
+                resultado.mappings().one()
+            )
 
     def listar_por_solicitud(self, solicitud_id):
         consulta = text("""
@@ -41,7 +47,28 @@ class DocumentoRepository:
                 consulta,
                 {"solicitud_id": str(solicitud_id)}
             )
-            return [dict(fila) for fila in resultado.mappings()]
+
+            return [
+                dict(fila)
+                for fila in resultado.mappings()
+            ]
+
+    def obtener_por_id(self, documento_id):
+        consulta = text("""
+            SELECT *
+            FROM documentos
+            WHERE id = :documento_id
+        """)
+
+        with engine.connect() as connection:
+            resultado = connection.execute(
+                consulta,
+                {"documento_id": str(documento_id)}
+            )
+
+            fila = resultado.mappings().first()
+
+            return dict(fila) if fila else None
 
 
 documento_repository = DocumentoRepository()
