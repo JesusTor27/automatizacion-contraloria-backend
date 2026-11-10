@@ -1,10 +1,18 @@
 
-from pathlib import Path
+from app.repositories.solicitud_repository import (
+    solicitud_repository
+)
 
-from app.repositories.solicitud_repository import solicitud_repository
-from app.repositories.documento_repository import documento_repository
+from app.repositories.documento_repository import (
+    documento_repository
+)
+
 from app.supabase_client import supabase
 
+
+# ==========================================
+# CONFIGURACIÓN
+# ==========================================
 
 ESTADOS_VALIDOS = {
     "RECIBIDA",
@@ -27,26 +35,61 @@ DOCUMENTOS_REQUERIDOS = {
 
 class SolicitudService:
 
+    # ==========================================
+    # CREAR SOLICITUD
+    # ==========================================
+
     def crear_solicitud(self, datos):
         try:
             return solicitud_repository.crear(datos)
+
         except Exception as error:
             if "correo_message_id" in str(error):
                 raise ValueError(
                     "Ya existe una solicitud asociada a ese correo."
                 )
+
             raise
+
+    # ==========================================
+    # LISTAR SOLICITUDES
+    # ==========================================
 
     def listar_solicitudes(self):
         return solicitud_repository.listar()
 
+    # ==========================================
+    # OBTENER SOLICITUD
+    # ==========================================
+
     def obtener_solicitud(self, solicitud_id):
-        solicitud = solicitud_repository.obtener_por_id(solicitud_id)
+        solicitud = solicitud_repository.obtener_por_id(
+            solicitud_id
+        )
 
         if not solicitud:
-            raise LookupError("La solicitud no existe.")
+            raise LookupError(
+                "La solicitud no existe."
+            )
 
         return solicitud
+
+    # ==========================================
+    # CONSULTAR HISTORIAL
+    # ==========================================
+
+    def obtener_historial(self, solicitud_id):
+        # Verificar que la solicitud exista
+        self.obtener_solicitud(solicitud_id)
+
+        # Consultar sus cambios de estado
+        return solicitud_repository.obtener_historial(
+            solicitud_id
+        )
+
+    # ==========================================
+    # CAMBIAR ESTADO
+    # ==========================================
 
     def cambiar_estado(
         self,
@@ -55,16 +98,23 @@ class SolicitudService:
         observaciones=None
     ):
         if nuevo_estado not in ESTADOS_VALIDOS:
-            raise ValueError("El estado indicado no es válido.")
+            raise ValueError(
+                "El estado indicado no es válido."
+            )
 
-        solicitud = self.obtener_solicitud(solicitud_id)
+        solicitud = self.obtener_solicitud(
+            solicitud_id
+        )
+
         estado_anterior = solicitud["estado"]
 
         if estado_anterior != nuevo_estado:
-            actualizada = solicitud_repository.actualizar_estado(
-                solicitud_id,
-                nuevo_estado,
-                observaciones
+            actualizada = (
+                solicitud_repository.actualizar_estado(
+                    solicitud_id,
+                    nuevo_estado,
+                    observaciones
+                )
             )
 
             solicitud_repository.registrar_cambio_estado(
@@ -78,16 +128,24 @@ class SolicitudService:
 
         return solicitud
 
-    
-    def validar_documentos(self, solicitud_id):
-        solicitud = self.obtener_solicitud(solicitud_id)
+    # ==========================================
+    # VALIDAR DOCUMENTOS
+    # ==========================================
 
-        documentos = documento_repository.listar_por_solicitud(
+    def validar_documentos(self, solicitud_id):
+        solicitud = self.obtener_solicitud(
             solicitud_id
         )
 
+        documentos = (
+            documento_repository.listar_por_solicitud(
+                solicitud_id
+            )
+        )
+
         tipos_encontrados = {
-            documento["tipo"] for documento in documentos
+            documento["tipo"]
+            for documento in documentos
         }
 
         documentos_faltantes = []
@@ -109,13 +167,24 @@ class SolicitudService:
 
             for documento in documentos_tipo:
                 ruta = documento["ruta_almacenamiento"]
-                carpeta, nombre_archivo = ruta.rsplit("/", 1)
 
-                archivos = supabase.storage.from_(BUCKET).list(carpeta)
+                carpeta, nombre_archivo = ruta.rsplit(
+                    "/",
+                    1
+                )
+
+                archivos = (
+                    supabase.storage
+                    .from_(BUCKET)
+                    .list(carpeta)
+                )
 
                 existe = any(
                     archivo.get("name") == nombre_archivo
-                    and not archivo.get("is_delete_marker", False)
+                    and not archivo.get(
+                        "is_delete_marker",
+                        False
+                    )
                     for archivo in archivos
                 )
 
@@ -124,9 +193,18 @@ class SolicitudService:
                     break
 
             if not archivo_encontrado:
-                archivos_faltantes_storage.append(tipo)
+                archivos_faltantes_storage.append(
+                    tipo
+                )
 
-        if documentos_faltantes or archivos_faltantes_storage:
+        # ==========================================
+        # DETERMINAR ESTADO
+        # ==========================================
+
+        if (
+            documentos_faltantes
+            or archivos_faltantes_storage
+        ):
             estado = "PENDIENTE"
 
             partes = []
@@ -134,23 +212,37 @@ class SolicitudService:
             if documentos_faltantes:
                 partes.append(
                     "Faltan documentos registrados: "
-                    + ", ".join(sorted(documentos_faltantes))
+                    + ", ".join(
+                        sorted(documentos_faltantes)
+                    )
                 )
 
             if archivos_faltantes_storage:
                 partes.append(
-                    "No se encontraron en Storage los archivos de: "
-                    + ", ".join(sorted(archivos_faltantes_storage))
+                    "No se encontraron en Storage "
+                    "los archivos de: "
+                    + ", ".join(
+                        sorted(
+                            archivos_faltantes_storage
+                        )
+                    )
                 )
 
-            observaciones = ". ".join(partes)
+            observaciones = ". ".join(
+                partes
+            )
 
         else:
             estado = "LISTA_PARA_PUBLICAR"
+
             observaciones = (
-                "Los documentos obligatorios están registrados "
-                "y existen en Supabase Storage."
+                "Los documentos obligatorios están "
+                "registrados y existen en Supabase Storage."
             )
+
+        # ==========================================
+        # ACTUALIZAR ESTADO
+        # ==========================================
 
         actualizada = self.cambiar_estado(
             solicitud_id,
@@ -161,14 +253,21 @@ class SolicitudService:
         return {
             "solicitud_id": str(solicitud_id),
             "estado": estado,
-            "documentos_registrados": sorted(tipos_encontrados),
-            "documentos_faltantes": sorted(documentos_faltantes),
+            "documentos_registrados": sorted(
+                tipos_encontrados
+            ),
+            "documentos_faltantes": sorted(
+                documentos_faltantes
+            ),
             "archivos_faltantes_storage": sorted(
-                archivos_faltantes_storage
+                archivos_faltantes
             ),
             "solicitud": actualizada
         }
 
 
+# ==========================================
+# INSTANCIA DEL SERVICIO
+# ==========================================
 
 solicitud_service = SolicitudService()
