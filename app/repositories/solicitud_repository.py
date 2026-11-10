@@ -1,245 +1,272 @@
-from sqlalchemy import text
-from app.database import engine
+from app.repositories.solicitud_repository import (
+    solicitud_repository
+)
+
+from app.repositories.documento_repository import (
+    documento_repository
+)
+
+from app.supabase_client import supabase
 
 
-class SolicitudRepository:
+# ==========================================
+# CONFIGURACIÓN
+# ==========================================
+
+ESTADOS_VALIDOS = {
+    "RECIBIDA",
+    "PENDIENTE",
+    "LISTA_PARA_PUBLICAR",
+    "PUBLICADA",
+    "EVIDENCIA_GENERADA",
+    "EVIDENCIA_APROBADA",
+    "RESPONDIDA",
+    "OBSERVADA"
+}
+
+BUCKET = "documentos-contraloria"
+
+DOCUMENTOS_REQUERIDOS = {
+    "DOCUMENTO_PUBLICAR",
+    "FORMATO_PUBLICACION"
+}
+
+
+class SolicitudService:
 
     # ==========================================
     # CREAR SOLICITUD
     # ==========================================
 
-    def crear(self, datos):
-        consulta = text("""
-            INSERT INTO solicitudes (
-                asunto,
-                remitente,
-                dependencia_id,
-                correo_message_id,
-                codigo_publicacion
-            )
-            VALUES (
-                :asunto,
-                :remitente,
-                :dependencia_id,
-                :correo_message_id,
-                :codigo_publicacion
-            )
-            RETURNING *
-        """)
+    def crear_solicitud(self, datos):
+        try:
+            return solicitud_repository.crear(datos)
 
-        with engine.begin() as connection:
-            resultado = connection.execute(
-                consulta,
-                datos
-            )
+        except Exception as error:
+            if "correo_message_id" in str(error):
+                raise ValueError(
+                    "Ya existe una solicitud asociada a ese correo."
+                )
 
-            return dict(resultado.mappings().one())
+            raise
 
     # ==========================================
     # LISTAR SOLICITUDES
     # ==========================================
 
-    def listar(self):
-        consulta = text("""
-            SELECT *
-            FROM solicitudes
-            ORDER BY fecha_recepcion DESC
-        """)
-
-        with engine.connect() as connection:
-            resultado = connection.execute(consulta)
-
-            return [
-                dict(fila)
-                for fila in resultado.mappings()
-            ]
+    def listar_solicitudes(self):
+        return solicitud_repository.listar()
 
     # ==========================================
-    # OBTENER SOLICITUD POR ID
+    # OBTENER SOLICITUD
     # ==========================================
 
-    def obtener_por_id(self, solicitud_id):
-        consulta = text("""
-            SELECT *
-            FROM solicitudes
-            WHERE id = :id
-        """)
+    def obtener_solicitud(self, solicitud_id):
+        solicitud = solicitud_repository.obtener_por_id(
+            solicitud_id
+        )
 
-        with engine.connect() as connection:
-            resultado = connection.execute(
-                consulta,
-                {"id": str(solicitud_id)}
+        if not solicitud:
+            raise LookupError(
+                "La solicitud no existe."
             )
 
-            fila = resultado.mappings().first()
-
-            return dict(fila) if fila else None
+        return solicitud
 
     # ==========================================
-    # ACTUALIZAR ESTADO
-    # ==========================================
-
-    def actualizar_estado(
-        self,
-        solicitud_id,
-        estado,
-        observaciones
-    ):
-        consulta = text("""
-            UPDATE solicitudes
-            SET
-                estado = :estado,
-                observaciones = :observaciones,
-                updated_at = NOW()
-            WHERE id = :id
-            RETURNING *
-        """)
-
-        with engine.begin() as connection:
-            resultado = connection.execute(
-                consulta,
-                {
-                    "id": str(solicitud_id),
-                    "estado": estado,
-                    "observaciones": observaciones
-                }
-            )
-
-            fila = resultado.mappings().first()
-
-            return dict(fila) if fila else None
-
-    # ==========================================
-    # OBTENER TIPOS DE DOCUMENTOS
-    # ==========================================
-
-    def obtener_tipos_documentos(self, solicitud_id):
-        consulta = text("""
-            SELECT tipo
-            FROM documentos
-            WHERE solicitud_id = :id
-        """)
-
-        with engine.connect() as connection:
-            resultado = connection.execute(
-                consulta,
-                {"id": str(solicitud_id)}
-            )
-
-            return [
-                fila.tipo
-                for fila in resultado
-            ]
-
-    # ==========================================
-    # REGISTRAR CAMBIO DE ESTADO
-    # ==========================================
-
-    def registrar_cambio_estado(
-        self,
-        solicitud_id,
-        estado_anterior,
-        estado_nuevo,
-        detalle
-    ):
-        consulta = text("""
-            INSERT INTO historial_estados (
-                solicitud_id,
-                estado_anterior,
-                estado_nuevo,
-                detalle
-            )
-            VALUES (
-                :solicitud_id,
-                :estado_anterior,
-                :estado_nuevo,
-                :detalle
-            )
-        """)
-
-        with engine.begin() as connection:
-            connection.execute(
-                consulta,
-                {
-                    "solicitud_id": str(solicitud_id),
-                    "estado_anterior": estado_anterior,
-                    "estado_nuevo": estado_nuevo,
-                    "detalle": detalle
-                }
-            )
-
-    # ==========================================
-    # CONSULTAR HISTORIAL DE SOLICITUD
+    # CONSULTAR HISTORIAL
     # ==========================================
 
     def obtener_historial(self, solicitud_id):
-        consulta = text("""
-            SELECT *
-            FROM historial_estados
-            WHERE solicitud_id = :solicitud_id
-        """)
+        # Verificar que la solicitud exista
+        self.obtener_solicitud(solicitud_id)
 
-        with engine.connect() as connection:
-            resultado = connection.execute(
-                consulta,
-                {
-                    "solicitud_id": str(solicitud_id)
-                }
+        # Obtener todos sus cambios de estado
+        return solicitud_repository.obtener_historial(
+            solicitud_id
+        )
+
+    # ==========================================
+    # CAMBIAR ESTADO
+    # ==========================================
+
+    def cambiar_estado(
+        self,
+        solicitud_id,
+        nuevo_estado,
+        observaciones=None
+    ):
+        if nuevo_estado not in ESTADOS_VALIDOS:
+            raise ValueError(
+                "El estado indicado no es válido."
             )
 
-            registros = [
-                dict(fila)
-                for fila in resultado.mappings()
+        solicitud = self.obtener_solicitud(
+            solicitud_id
+        )
+
+        estado_anterior = solicitud["estado"]
+
+        if estado_anterior != nuevo_estado:
+            actualizada = (
+                solicitud_repository.actualizar_estado(
+                    solicitud_id,
+                    nuevo_estado,
+                    observaciones
+                )
+            )
+
+            solicitud_repository.registrar_cambio_estado(
+                solicitud_id,
+                estado_anterior,
+                nuevo_estado,
+                observaciones or "Actualización de estado"
+            )
+
+            return actualizada
+
+        return solicitud
+
+    # ==========================================
+    # VALIDAR DOCUMENTOS
+    # ==========================================
+
+    def validar_documentos(self, solicitud_id):
+        solicitud = self.obtener_solicitud(
+            solicitud_id
+        )
+
+        documentos = (
+            documento_repository.listar_por_solicitud(
+                solicitud_id
+            )
+        )
+
+        tipos_encontrados = {
+            documento["tipo"]
+            for documento in documentos
+        }
+
+        documentos_faltantes = []
+        archivos_faltantes_storage = []
+
+        for tipo in DOCUMENTOS_REQUERIDOS:
+
+            documentos_tipo = [
+                documento
+                for documento in documentos
+                if documento["tipo"] == tipo
             ]
 
-        # Ordenar por el campo de fecha disponible.
-        # Se contemplan varios nombres habituales.
-        def obtener_fecha(registro):
-            for campo in (
-                "fecha_cambio",
-                "fecha_registro",
-                "created_at"
-            ):
-                valor = registro.get(campo)
+            if not documentos_tipo:
+                documentos_faltantes.append(tipo)
+                continue
 
-                if valor is not None:
-                    return str(valor)
+            archivo_encontrado = False
 
-            return ""
+            for documento in documentos_tipo:
+                ruta = documento["ruta_almacenamiento"]
 
-        registros.sort(key=obtener_fecha)
+                carpeta, nombre_archivo = ruta.rsplit(
+                    "/",
+                    1
+                )
 
-        return registros
+                archivos = (
+                    supabase.storage
+                    .from_(BUCKET)
+                    .list(carpeta)
+                )
 
-    # ==========================================
-    # OBTENER NOMBRE DE DEPENDENCIA
-    # ==========================================
+                existe = any(
+                    archivo.get("name") == nombre_archivo
+                    and not archivo.get(
+                        "is_delete_marker",
+                        False
+                    )
+                    for archivo in archivos
+                )
 
-    def obtener_nombre_dependencia(self, dependencia_id):
-        if not dependencia_id:
-            return None
+                if existe:
+                    archivo_encontrado = True
+                    break
 
-        consulta = text("""
-            SELECT nombre
-            FROM dependencias
-            WHERE id = :dependencia_id
-        """)
+            if not archivo_encontrado:
+                archivos_faltantes_storage.append(
+                    tipo
+                )
 
-        with engine.connect() as connection:
-            resultado = connection.execute(
-                consulta,
-                {
-                    "dependencia_id": str(dependencia_id)
-                }
+        # ==========================================
+        # DETERMINAR ESTADO
+        # ==========================================
+
+        if (
+            documentos_faltantes
+            or archivos_faltantes_storage
+        ):
+            estado = "PENDIENTE"
+
+            partes = []
+
+            if documentos_faltantes:
+                partes.append(
+                    "Faltan documentos registrados: "
+                    + ", ".join(
+                        sorted(documentos_faltantes)
+                    )
+                )
+
+            if archivos_faltantes_storage:
+                partes.append(
+                    "No se encontraron en Storage "
+                    "los archivos de: "
+                    + ", ".join(
+                        sorted(
+                            archivos_faltantes_storage
+                        )
+                    )
+                )
+
+            observaciones = ". ".join(
+                partes
             )
 
-            fila = resultado.mappings().first()
+        else:
+            estado = "LISTA_PARA_PUBLICAR"
 
-            return fila["nombre"] if fila else None
+            observaciones = (
+                "Los documentos obligatorios están "
+                "registrados y existen en Supabase Storage."
+            )
+
+        # ==========================================
+        # ACTUALIZAR ESTADO
+        # ==========================================
+
+        actualizada = self.cambiar_estado(
+            solicitud_id,
+            estado,
+            observaciones
+        )
+
+        return {
+            "solicitud_id": str(solicitud_id),
+            "estado": estado,
+            "documentos_registrados": sorted(
+                tipos_encontrados
+            ),
+            "documentos_faltantes": sorted(
+                documentos_faltantes
+            ),
+            "archivos_faltantes_storage": sorted(
+                archivos_faltantes_storage
+            ),
+            "solicitud": actualizada
+        }
 
 
 # ==========================================
-# INSTANCIA DEL REPOSITORIO
+# INSTANCIA DEL SERVICIO
 # ==========================================
 
-solicitud_repository = SolicitudRepository()
+solicitud_service = SolicitudService()
