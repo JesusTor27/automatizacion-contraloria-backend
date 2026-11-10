@@ -145,6 +145,7 @@ def actualizar_estado(
 # VALIDAR DOCUMENTOS
 # ==========================================
 
+
 @router.post("/{solicitud_id}/validar")
 def validar_documentos(solicitud_id: UUID):
     try:
@@ -156,10 +157,25 @@ def validar_documentos(solicitud_id: UUID):
         raise HTTPException(
             status_code=404,
             detail=str(error)
+        ) from error
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        ) from error
+
+    except Exception as error:
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        logger.exception(
+            "Error al validar documentos de la solicitud %s",
+            solicitud_id
         )
 
-    except Exception:
         raise HTTPException(
             status_code=500,
-            detail="Error al validar los documentos de la solicitud."
-        )
+            detail="Error interno al validar los documentos."
+        ) from error
