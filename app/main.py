@@ -32,8 +32,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        # Desarrollo local
         "http://localhost:5500",
-        "http://127.0.0.1:5500"
+        "http://127.0.0.1:5500",
+
+        # Frontend desplegado en Render
+        "https://automatizacion-contraloria-frontend.onrender.com"
     ],
     allow_credentials=False,
     allow_methods=[
@@ -50,6 +54,7 @@ app.add_middleware(
         "X-API-Key"
     ]
 )
+
 
 
 # ==========================================
