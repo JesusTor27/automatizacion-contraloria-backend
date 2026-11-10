@@ -1,4 +1,3 @@
-
 from app.repositories.solicitud_repository import (
     solicitud_repository
 )
@@ -133,10 +132,13 @@ class SolicitudService:
     # ==========================================
 
     def validar_documentos(self, solicitud_id):
+
+        # 1. Verificar que exista la solicitud
         solicitud = self.obtener_solicitud(
             solicitud_id
         )
 
+        # 2. Obtener documentos registrados
         documentos = (
             documento_repository.listar_por_solicitud(
                 solicitud_id
@@ -151,6 +153,7 @@ class SolicitudService:
         documentos_faltantes = []
         archivos_faltantes_storage = []
 
+        # 3. Comprobar documentos obligatorios
         for tipo in DOCUMENTOS_REQUERIDOS:
 
             documentos_tipo = [
@@ -165,6 +168,7 @@ class SolicitudService:
 
             archivo_encontrado = False
 
+            # 4. Verificar existencia en Storage
             for documento in documentos_tipo:
                 ruta = documento["ruta_almacenamiento"]
 
@@ -228,9 +232,7 @@ class SolicitudService:
                     )
                 )
 
-            observaciones = ". ".join(
-                partes
-            )
+            observaciones = ". ".join(partes)
 
         else:
             estado = "LISTA_PARA_PUBLICAR"
@@ -250,6 +252,10 @@ class SolicitudService:
             observaciones
         )
 
+        # ==========================================
+        # DEVOLVER RESULTADO
+        # ==========================================
+
         return {
             "solicitud_id": str(solicitud_id),
             "estado": estado,
@@ -260,7 +266,7 @@ class SolicitudService:
                 documentos_faltantes
             ),
             "archivos_faltantes_storage": sorted(
-                archivos_faltantes
+                archivos_faltantes_storage
             ),
             "solicitud": actualizada
         }
